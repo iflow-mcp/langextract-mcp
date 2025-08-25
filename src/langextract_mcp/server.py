@@ -25,12 +25,13 @@ class ExtractionConfig(BaseModel):
     temperature: float = Field(default=0.5, description="Sampling temperature (0.0-1.0)")
     extraction_passes: int = Field(default=1, description="Number of extraction passes for better recall")
     max_workers: int = Field(default=10, description="Max parallel workers")
+    base_url: str = Field(default=None, description="Base URL for server")
 
 
 # Initialize FastMCP server with Claude Code compatibility
 mcp = FastMCP(
     name="langextract-mcp",
-    instructions="Extract structured information from unstructured text using Google Gemini models. "
+    instructions="Extract structured information from unstructured text using Google Gemini or OpenAI models. "
                 "Provides precise source grounding, interactive visualizations, and optimized caching for performance."
 )
 
@@ -60,17 +61,29 @@ class LangExtractClient:
         model_key = f"{config.model_id}_{config.temperature}_{config.max_workers}_{schema_hash or 'no_schema'}"
         
         if model_key not in self._language_models:
-            # Validate that only Gemini models are supported
-            if not config.model_id.startswith('gemini'):
-                raise ValueError(f"Only Gemini models are supported. Got: {config.model_id}")
-                
-            language_model = lx.inference.GeminiLanguageModel(
-                model_id=config.model_id,
-                api_key=api_key,
-                temperature=config.temperature,
-                max_workers=config.max_workers,
-                gemini_schema=schema
-            )
+            if config.base_url:
+                # Support for OpenAI GPT models
+                from src.langextract_mcp import inference
+                language_model = inference.OpenAILanguageModel(
+                    base_url=config.base_url,
+                    model_id=config.model_id,
+                    api_key=api_key,
+                    temperature=config.temperature,
+                    max_workers=config.max_workers
+                )
+            # Determine model type based on model_id prefix
+            elif config.model_id.startswith('gemini'):
+                # Validate that only Gemini models are supported for Gemini prefix
+                language_model = lx.inference.GeminiLanguageModel(
+                    model_id=config.model_id,
+                    api_key=api_key,
+                    temperature=config.temperature,
+                    max_workers=config.max_workers,
+                    gemini_schema=schema
+                )
+            else:
+                raise ValueError(f"Unsupported model ID: {config.model_id}")
+
             self._language_models[model_key] = language_model
             
         return self._language_models[model_key]
@@ -275,24 +288,18 @@ def extract_from_text(
             
         if not text.strip():
             raise ToolError("Input text cannot be empty")
-        
-        # Validate that only Gemini models are supported
-        if not model_id.startswith('gemini'):
-            raise ToolError(
-                f"Only Google Gemini models are supported. Got: {model_id}. "
-                f"Use 'list_supported_models' tool to see available options."
-            )
-        
+
         # Create config object from individual parameters
         config = ExtractionConfig(
             model_id=model_id,
             max_char_buffer=max_char_buffer,
             temperature=temperature,
             extraction_passes=extraction_passes,
-            max_workers=max_workers
+            max_workers=max_workers,
+            base_url=os.environ.get("LANGEXTRACT_BASE_URL")
         )
-        
-        # Get API key (server-side only for security)
+
+        # Get appropriate API key based on model type
         api_key = _get_api_key()
         if not api_key:
             raise ToolError(
@@ -359,21 +366,15 @@ def extract_from_url(
         
         if not prompt_description.strip():
             raise ToolError("Prompt description cannot be empty")
-        
-        # Validate that only Gemini models are supported
-        if not model_id.startswith('gemini'):
-            raise ToolError(
-                f"Only Google Gemini models are supported. Got: {model_id}. "
-                f"Use 'list_supported_models' tool to see available options."
-            )
-        
+
         # Create config object from individual parameters
         config = ExtractionConfig(
             model_id=model_id,
             max_char_buffer=max_char_buffer,
             temperature=temperature,
             extraction_passes=extraction_passes,
-            max_workers=max_workers
+            max_workers=max_workers,
+            base_url=os.environ.get("LANGEXTRACT_BASE_URL")
         )
         
         # Get API key (server-side only for security)
