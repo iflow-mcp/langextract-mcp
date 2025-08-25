@@ -63,7 +63,7 @@ class LangExtractClient:
         if model_key not in self._language_models:
             if config.base_url:
                 # Support for OpenAI GPT models
-                from src.langextract_mcp import inference
+                from . import inference
                 language_model = inference.OpenAILanguageModel(
                     base_url=config.base_url,
                     model_id=config.model_id,
